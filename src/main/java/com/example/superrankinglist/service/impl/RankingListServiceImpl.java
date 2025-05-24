@@ -22,8 +22,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import static com.example.superrankinglist.common.RedisKey.RANKING_KEY_PREFIX;
 
-import static com.example.superrankinglist.common.RedisKey.LIKE_KEY_PREFIX;
 
 /**
  * 排行榜服务实现类
@@ -52,23 +52,28 @@ public class RankingListServiceImpl implements RankingListService {
         }
 
         // 排行榜key
-        String rankingKey = LIKE_KEY_PREFIX + queryDto.getRankingListId();
+        String rankingKey = RANKING_KEY_PREFIX + queryDto.getRankingListId();
+        log.info("查询排行榜，key: {}", rankingKey);
 
         // 计算分页参数
         int startIndex = (queryDto.getPageNum() - 1) * queryDto.getPageSize();
         int endIndex = startIndex + queryDto.getPageSize() - 1;
+        log.info("分页参数 - startIndex: {}, endIndex: {}", startIndex, endIndex);
 
         try {
             // 使用ZREVRANGE获取排行榜数据
             Set<ZSetOperations.TypedTuple<Object>> rankingData = redisTemplate.opsForZSet()
                     .reverseRangeWithScores(rankingKey, startIndex, endIndex);
+            log.info("从Redis获取到的排行榜数据: {}", rankingData);
 
             if (rankingData == null || rankingData.isEmpty()) {
+                log.info("Redis中没有找到排行榜数据");
                 return new Page<>(queryDto.getPageNum(), queryDto.getPageSize());
             }
 
             // 获取总记录数
             Long total = redisTemplate.opsForZSet().size(rankingKey);
+            log.info("排行榜总记录数: {}", total);
 
             // 收集所有用户ID
             List<String> userIds = rankingData.stream()
@@ -78,6 +83,14 @@ public class RankingListServiceImpl implements RankingListService {
                     })
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
+            log.info("收集到的用户ID列表: {}", userIds);
+
+            // 如果userIds为空，直接返回空分页结果
+            if (userIds.isEmpty()) {
+                Page<RankingItem> emptyPage = new Page<>(queryDto.getPageNum(), queryDto.getPageSize());
+                emptyPage.setTotal(0L);
+                return emptyPage;
+            }
 
             // 批量查询用户信息
             Map<Long, User> userMap = userMapper.selectBatchIds(userIds)
@@ -104,12 +117,21 @@ public class RankingListServiceImpl implements RankingListService {
                         item.setUserId(user.getId());
                         item.setScore(score != null ? score : 0.0);
                         item.setRankingListId(queryDto.getRankingListId());
-                        //item.setUserName(user.getUsername()); // 假设需要显示用户名
-
+                        item.setUser(user);  // 设置用户信息
                         return item;
                     })
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
+
+            // 计算排名
+            for (int i = 0; i < items.size(); i++) {
+                // 排名从1开始，且相同分数的用户排名相同
+                if (i > 0 && items.get(i).getScore().equals(items.get(i - 1).getScore())) {
+                    items.get(i).setRanking(items.get(i - 1).getRanking());
+                } else {
+                    items.get(i).setRanking((long) (startIndex + i + 1));
+                }
+            }
 
             // 创建分页对象
             Page<RankingItem> page = new Page<>(queryDto.getPageNum(), queryDto.getPageSize());

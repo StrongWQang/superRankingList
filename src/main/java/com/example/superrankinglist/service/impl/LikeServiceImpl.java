@@ -1,61 +1,80 @@
 package com.example.superrankinglist.service.impl;
 
-import com.example.superrankinglist.dto.LikeCheckDto;
-import com.example.superrankinglist.dto.LikeCountDto;
 import com.example.superrankinglist.dto.LikeDto;
 import com.example.superrankinglist.service.LikeService;
 import com.example.superrankinglist.utils.UserContext;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Service;
 
-import static com.example.superrankinglist.common.RedisKey.LIKE_KEY_PREFIX;
-import static com.example.superrankinglist.common.RedisKey.USER_ID_MEMBER;
+import jakarta.annotation.PostConstruct;
+import java.util.Arrays;
+import java.util.List;
 
+import static com.example.superrankinglist.common.RedisKey.RANKING_KEY_PREFIX;
 
 /**
  * 点赞服务实现类
  */
+@Log4j2
 @Service
 public class LikeServiceImpl implements LikeService {
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    private DefaultRedisScript<Long> redisScript;
+
+    @PostConstruct
+    public void init() {
+        try {
+            redisScript = new DefaultRedisScript<>();
+            redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("lua/update_ranking.lua")));
+            redisScript.setResultType(Long.class);
+            log.info("Lua脚本加载成功");
+        } catch (Exception e) {
+            log.error("Lua脚本加载失败", e);
+            throw new RuntimeException("Lua脚本加载失败", e);
+        }
+    }
 
     @Override
     public boolean like(LikeDto likeDto) {
-        Long userId = UserContext.getUserId();
-        if (userId == null) {
-            throw new RuntimeException("User not logged in");
+        try {
+            Long userId = UserContext.getUserId();
+            if (userId == null) {
+                throw new RuntimeException("User not logged in");
+            }
+
+            // 排行榜key
+            String rankingKey = RANKING_KEY_PREFIX + likeDto.getRankingListId();
+            log.info("用户 {} 点赞排行榜 {}, key: {}", userId, likeDto.getRankingListId(), rankingKey);
+
+            // 生成请求ID（这里使用时间戳+用户ID作为示例，实际应该使用分布式ID生成器）
+            String requestId = System.currentTimeMillis() + "_" + userId;
+            log.debug("生成的请求ID: {}", requestId);
+
+            // 准备Lua脚本参数
+            List<String> keys = Arrays.asList(rankingKey, userId.toString());
+            List<String> args = Arrays.asList(requestId, "1");  // 1表示增加1分
+            log.debug("Lua脚本参数 - keys: {}, args: {}", keys, args);
+
+            // 执行Lua脚本
+            Long result = redisTemplate.execute(redisScript, keys, args.toArray());
+            log.info("更新排行榜结果: {}", result);
+
+            return true;
+        } catch (RedisSystemException e) {
+            log.error("Redis操作失败", e);
+            throw new RuntimeException("点赞操作失败: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("点赞操作失败", e);
+            throw new RuntimeException("点赞操作失败: " + e.getMessage(), e);
         }
-
-        //排行榜key
-        String likeKey = LIKE_KEY_PREFIX  + likeDto.getRankingListId();
-        //排行榜memeber
-        String userLikeKey = USER_ID_MEMBER + userId;
-
-        //如果member不在ZSET中，则将其作为新成员加入并设置初始score=1
-        redisTemplate.opsForZSet().incrementScore(likeKey, userLikeKey, 1);
-
-        return true;
     }
-
-
-
-
-
-    @Override
-    public long getLikeCount(LikeCountDto likeCountDto) {
-        String likeKey = LIKE_KEY_PREFIX + likeCountDto.getRankingListId();
-        Long count = redisTemplate.opsForValue().increment(likeKey, 0);
-        return count != null ? count : 0;
-    }
-
-    @Override
-    public boolean checkLiked(LikeCheckDto likeCheckDto) {
-        return false;
-    }
-
-
 } 
