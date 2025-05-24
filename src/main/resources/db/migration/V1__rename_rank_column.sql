@@ -1,0 +1,1 @@
+ALTER TABLE ranking_item CHANGE COLUMN `rank` `ranking` BIGINT DEFAULT 0 COMMENT '用户在该排行榜中的排名'; 

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.superrankinglist.mapper.LikeMapper">
+    
+    <!-- 添加点赞记录 -->
+    <insert id="insertLike">
+        INSERT INTO like_record (user_id, ranking_list_id, create_time, update_time)
+        VALUES (#{userId}, #{rankingListId}, NOW(), NOW())
+    </insert>
+
+    <!-- 删除点赞记录 -->
+    <delete id="deleteLike">
+        DELETE FROM like_record
+        WHERE user_id = #{userId} AND ranking_list_id = #{rankingListId}
+    </delete>
+
+    <!-- 获取点赞数 -->
+    <select id="countLikes" resultType="long">
+        SELECT COUNT(*)
+        FROM like_record
+        WHERE ranking_list_id = #{rankingListId}
+    </select>
+
+    <!-- 检查用户是否已点赞 -->
+    <select id="checkLiked" resultType="int">
+        SELECT COUNT(*)
+        FROM like_record
+        WHERE user_id = #{userId} AND ranking_list_id = #{rankingListId}
+    </select>
+</mapper> 
