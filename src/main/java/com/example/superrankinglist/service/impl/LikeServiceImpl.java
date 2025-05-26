@@ -55,18 +55,22 @@ public class LikeServiceImpl implements LikeService {
             String rankingKey = RANKING_KEY_PREFIX + likeDto.getRankingListId();
             log.info("用户 {} 点赞排行榜 {}, key: {}", userId, likeDto.getRankingListId(), rankingKey);
 
-            // 生成请求ID（这里使用时间戳+用户ID作为示例，实际应该使用分布式ID生成器）
-            String requestId = System.currentTimeMillis() + "_" + userId;
+            // 生成请求ID（使用纳秒级时间戳）
+            String requestId = System.nanoTime() + "_" + userId;
             log.debug("生成的请求ID: {}", requestId);
 
             // 准备Lua脚本参数
-            List<String> keys = Arrays.asList(rankingKey, userId.toString());
-            List<String> args = Arrays.asList(requestId, "1");  // 1表示增加1分
+            List<String> keys = Arrays.asList(rankingKey, String.valueOf(userId));
+            List<Object> args = Arrays.asList(requestId, 1, System.currentTimeMillis());
             log.debug("Lua脚本参数 - keys: {}, args: {}", keys, args);
 
             // 执行Lua脚本
             Long result = redisTemplate.execute(redisScript, keys, args.toArray());
             log.info("更新排行榜结果: {}", result);
+
+            // 验证分数是否更新成功
+            Double score = redisTemplate.opsForZSet().score(rankingKey, String.valueOf(userId));
+            log.info("用户 {} 在排行榜 {} 中的最新分数: {}", userId, likeDto.getRankingListId(), score);
 
             return true;
         } catch (RedisSystemException e) {

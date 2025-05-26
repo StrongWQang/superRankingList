@@ -79,7 +79,7 @@ public class RankingListServiceImpl implements RankingListService {
             List<String> userIds = rankingData.stream()
                     .map(tuple -> {
                         Object value = tuple.getValue();
-                        return value instanceof String ? (String) value : null;
+                        return value != null ? String.valueOf(value) : null;
                     })
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
@@ -101,10 +101,10 @@ public class RankingListServiceImpl implements RankingListService {
             List<RankingItem> items = rankingData.stream()
                     .map(tuple -> {
                         Object value = tuple.getValue();
-                        if (!(value instanceof String)) {
+                        if (value == null) {
                             return null;
                         }
-                        String userId = (String) value;
+                        String userId = String.valueOf(value);
                         Double score = tuple.getScore();
 
                         User user = userMap.get(Long.valueOf(userId));
