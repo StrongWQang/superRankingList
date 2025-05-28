@@ -1,5 +1,8 @@
 package com.example.superrankinglist.pojo;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -10,11 +13,13 @@ import java.time.LocalDateTime;
  * 支持高并发场景下的线程安全操作
  */
 @Data
+@TableName("user")
 public class User {
     /**
      * 用户ID，主键
      * 使用AtomicLong确保ID生成的线程安全
      */
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /**
@@ -55,4 +60,9 @@ public class User {
      * 使用volatile确保多线程下的可见性
      */
     private volatile LocalDateTime updateTime;
+
+    /**
+     * 盐值，用于密码加密
+     */
+    private String salt;
 } 

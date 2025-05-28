@@ -64,4 +64,13 @@ public interface UserService {
      * @param id 用户ID
      */
     void deleteUser(Long id);
+
+    /**
+     * 验证密码
+     * @param rawPassword 原始密码
+     * @param salt 盐值
+     * @param hashedPassword 加密后的密码
+     * @return 是否验证成功
+     */
+    boolean verifyPassword(String rawPassword, String salt, String hashedPassword);
 } 
