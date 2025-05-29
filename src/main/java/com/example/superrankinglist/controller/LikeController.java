@@ -2,10 +2,9 @@ package com.example.superrankinglist.controller;
 
 import com.example.superrankinglist.common.Result;
 
-import com.example.superrankinglist.dto.LikeCheckDto;
-import com.example.superrankinglist.dto.LikeCountDto;
 import com.example.superrankinglist.dto.LikeDto;
 import com.example.superrankinglist.service.LikeService;
+import com.example.superrankinglist.service.RankingListService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 

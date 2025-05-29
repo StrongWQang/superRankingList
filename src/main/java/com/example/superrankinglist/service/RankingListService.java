@@ -88,4 +88,7 @@ public interface RankingListService {
      * @return 包含用户排名和积分的对象
      */
     RankingItem getUserRankAndScore(Long rankingListId, Long userId);
+
+
+    boolean updateRankingScore(Long rankingListId, Long userId, Double score);
 }

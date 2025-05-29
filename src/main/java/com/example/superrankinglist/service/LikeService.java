@@ -14,4 +14,6 @@ public interface LikeService {
      * @return 是否点赞成功
      */
     boolean like(LikeDto likeDto);
+
+
 } 

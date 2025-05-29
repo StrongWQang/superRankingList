@@ -30,6 +30,8 @@ public class LikeServiceImpl implements LikeService {
 
     private DefaultRedisScript<Long> redisScript;
 
+    @Autowired SegmentTreeServiceImpl segmentTreeService;
+
     @PostConstruct
     public void init() {
         try {
@@ -55,14 +57,12 @@ public class LikeServiceImpl implements LikeService {
             String rankingKey = RANKING_KEY_PREFIX + likeDto.getRankingListId();
             log.info("用户 {} 点赞排行榜 {}, key: {}", userId, likeDto.getRankingListId(), rankingKey);
 
-            // 生成请求ID（使用纳秒级时间戳）
-            String requestId = System.nanoTime() + "_" + userId;
-            log.debug("生成的请求ID: {}", requestId);
-
+            Double oldscore = redisTemplate.opsForZSet().score(rankingKey, userId);
             // 准备Lua脚本参数
             String userIdStr = String.valueOf(userId);
             List<String> keys = Arrays.asList(rankingKey, userIdStr);
-            List<Object> args = Arrays.asList(requestId, 1, System.currentTimeMillis());
+            // 确保score是数字类型，使用1.0而不是1
+            List<Object> args = Arrays.asList(1.0, System.currentTimeMillis());
             log.debug("Lua脚本参数 - keys: {}, args: {}", keys, args);
 
             // 执行Lua脚本
@@ -70,8 +70,10 @@ public class LikeServiceImpl implements LikeService {
             log.info("更新排行榜结果: {}", result);
 
             // 验证分数是否更新成功
-            Double score = redisTemplate.opsForZSet().score(rankingKey, userId);
-            log.info("用户 {} 在排行榜 {} 中的最新分数: {}", userId, likeDto.getRankingListId(), score);
+            Double newscore = redisTemplate.opsForZSet().score(rankingKey, userId);
+            log.info("用户 {} 在排行榜 {} 中的最新分数: {}", userId, likeDto.getRankingListId(), newscore);
+
+            segmentTreeService.updateScore(likeDto.getRankingListId(),oldscore,newscore);
 
             return true;
         } catch (RedisSystemException e) {
@@ -82,4 +84,6 @@ public class LikeServiceImpl implements LikeService {
             throw new RuntimeException("点赞操作失败: " + e.getMessage(), e);
         }
     }
+
+
 } 

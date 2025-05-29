@@ -20,7 +20,7 @@ public class LikeServiceImplTest {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    private static final String RANKING_KEY = RedisKey.RANKING_KEY_PREFIX + "1";
+    private static final String RANKING_KEY = RedisKey.RANKING_KEY_PREFIX + 1;
     private static final int TEST_DATA_SIZE = 1000;
     private static final Random random = new Random();
 

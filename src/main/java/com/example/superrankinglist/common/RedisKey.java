@@ -4,7 +4,9 @@ public class RedisKey {
     /**
      * 排行榜key前缀
      */
-    public static final String RANKING_KEY_PREFIX = "ranking:";
+    public static final String RANKING_KEY_PREFIX = "ranking:list:";
+
+    public static final String SEGMENT_KEY_PREFIX = "ranking:segment:";
     
     /**
      * 用户点赞key前缀

@@ -1,6 +1,7 @@
 package com.example.superrankinglist.service.impl;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.superrankinglist.dto.LikeDto;
 import com.example.superrankinglist.dto.RankingListQueryDto;
 import com.example.superrankinglist.mapper.RankingItemMapper;
 import com.example.superrankinglist.mapper.RankingListMapper;
@@ -9,6 +10,7 @@ import com.example.superrankinglist.pojo.RankingItem;
 import com.example.superrankinglist.pojo.RankingList;
 import com.example.superrankinglist.pojo.User;
 import com.example.superrankinglist.service.RankingListService;
+import com.example.superrankinglist.service.SegmentTreeService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -31,6 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import static com.example.superrankinglist.common.RedisKey.RANKING_KEY_PREFIX;
+import static com.example.superrankinglist.common.RedisKey.SEGMENT_KEY_PREFIX;
 
 
 /**
@@ -51,6 +54,12 @@ public class RankingListServiceImpl implements RankingListService {
 
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired
+    private SegmentTreeService segmentTreeService;
+
+    @Autowired
+    private LikeServiceImpl likeService;
 
     private DefaultRedisScript<List> getUserRankScript;
 
@@ -191,12 +200,82 @@ public class RankingListServiceImpl implements RankingListService {
         }
     }
 
+    /**
+     * 初始化排行榜的线段树
+     * @param rankingListId 排行榜ID
+     */
+    private void initRankingListSegmentTree(Long rankingListId) {
+        // 从Redis获取当前排行榜的积分范围
+        String rankingKey = RANKING_KEY_PREFIX + rankingListId;
+        Set<ZSetOperations.TypedTuple<Object>> scoreRange = redisTemplate.opsForZSet()
+                .rangeWithScores(rankingKey, 0, 0);
+        
+        if (scoreRange == null || scoreRange.isEmpty()) {
+            // 如果排行榜为空，使用默认值初始化
+            segmentTreeService.initSegmentTree(rankingListId, 0D, 1000000D, 100);
+            return;
+        }
+
+        // 获取最小和最大积分
+        Double minScore = Double.MAX_VALUE;
+        Double maxScore = Double.MIN_VALUE;
+        for (ZSetOperations.TypedTuple<Object> tuple : scoreRange) {
+            Double score = tuple.getScore();
+            if (score != null) {
+                minScore = Math.min(minScore, score);
+                maxScore = Math.max(maxScore, score);
+            }
+        }
+
+        // 确保积分范围合理
+        if (minScore.equals(Double.MAX_VALUE) || maxScore.equals(Double.MIN_VALUE)) {
+            minScore = 0.0;
+            maxScore = 1000000.0;
+        }
+
+        // 根据积分范围动态设置分段数量
+        int segmentCount = calculateSegmentCount(minScore, maxScore);
+        
+        // 初始化线段树
+        segmentTreeService.initSegmentTree(
+            rankingListId,
+            minScore,
+            maxScore,
+            segmentCount
+        );
+    }
+
+    /**
+     * 计算合适的分段数量
+     * @param minScore 最小积分
+     * @param maxScore 最大积分
+     * @return 分段数量
+     */
+    private int calculateSegmentCount(Double minScore, Double maxScore) {
+        // 基础分段数量
+        int baseCount = 100;
+        
+        // 根据积分范围调整分段数量
+        double range = maxScore - minScore;
+        if (range > 1000000) {
+            return baseCount * 2;  // 范围大时增加分段
+        } else if (range < 1000) {
+            return baseCount / 2;  // 范围小时减少分段
+        }
+        
+        return baseCount;
+    }
+
     @Override
     @Transactional
     public RankingList createRankingList(RankingList rankingList) {
         rankingList.setCreateTime(LocalDateTime.now());
         rankingList.setUpdateTime(LocalDateTime.now());
         rankingListMapper.insert(rankingList);
+        
+        // 创建排行榜时初始化线段树
+        initRankingListSegmentTree(rankingList.getId());
+        
         return rankingList;
     }
 
@@ -244,5 +323,89 @@ public class RankingListServiceImpl implements RankingListService {
     @Transactional
     public void deleteRankingList(Long id) {
         rankingListMapper.deleteById(id);
+    }
+
+    /**
+     * 更新用户排行榜积分
+     * 同时更新ZSet和线段树数据
+     * 
+     * @param rankingListId 排行榜ID
+     * @param userId 用户ID
+     * @param score 新的积分值
+     * @return 更新是否成功
+     */
+    @Transactional
+    public boolean updateRankingScore(Long rankingListId, Long userId, Double score) {
+        try {
+            // 1. 获取用户当前积分
+            String rankingKey = RANKING_KEY_PREFIX + rankingListId;
+            Double oldScore = redisTemplate.opsForZSet().score(rankingKey, userId);
+            
+            // 2. 更新ZSet中的积分
+            LikeDto likeDto = new LikeDto();
+            likeDto.setRankingListId(rankingListId);
+            boolean zsetUpdated = likeService.like(likeDto);
+            
+            if (!zsetUpdated) {
+                log.error("更新ZSet失败 - rankingListId: {}, userId: {}", rankingListId, userId);
+                return false;
+            }
+
+            if(redisTemplate.opsForHash().keys(SEGMENT_KEY_PREFIX + rankingListId).isEmpty()) {
+                // 如果线段树不存在 初始化线段树
+                segmentTreeService.initSegmentTree(
+                        rankingListId,
+                        0D,  // 最小积分
+                        1000000D,  // 最大积分
+                        100  // 分段数量
+                );
+            }
+            // 3. 更新线段树数据
+            else if (oldScore != null) {
+                segmentTreeService.updateScore(
+                    rankingListId,
+                    oldScore,
+                    score
+                );
+            }
+            
+            log.info("排行榜更新成功 - rankingListId: {}, userId: {}, oldScore: {}, newScore: {}", 
+                rankingListId, userId, oldScore, score);
+            return true;
+            
+        } catch (Exception e) {
+            log.error("更新排行榜失败 - rankingListId: {}, userId: {}, score: {}", 
+                rankingListId, userId, score, e);
+            throw new RuntimeException("更新排行榜失败", e);
+        }
+    }
+
+    /**
+     * 检查积分是否超出当前线段树的范围
+     * @param rankingListId 排行榜ID
+     * @param score 新积分
+     * @return 是否超出范围
+     */
+    private boolean isScoreOutOfRange(Long rankingListId, Double score) {
+        String rankingKey = RANKING_KEY_PREFIX + rankingListId;
+        Set<ZSetOperations.TypedTuple<Object>> scoreRange = redisTemplate.opsForZSet()
+                .rangeWithScores(rankingKey, 0, 0);
+        
+        if (scoreRange == null || scoreRange.isEmpty()) {
+            return true;
+        }
+
+        Double minScore = Double.MAX_VALUE;
+        Double maxScore = Double.MIN_VALUE;
+        for (ZSetOperations.TypedTuple<Object> tuple : scoreRange) {
+            Double currentScore = tuple.getScore();
+            if (currentScore != null) {
+                minScore = Math.min(minScore, currentScore);
+                maxScore = Math.max(maxScore, currentScore);
+            }
+        }
+
+        // 如果新积分超出当前范围，需要重新初始化
+        return score < minScore || score > maxScore;
     }
 } 
