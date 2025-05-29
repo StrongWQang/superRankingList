@@ -60,7 +60,8 @@ public class LikeServiceImpl implements LikeService {
             log.debug("生成的请求ID: {}", requestId);
 
             // 准备Lua脚本参数
-            List<String> keys = Arrays.asList(rankingKey, String.valueOf(userId));
+            String userIdStr = String.valueOf(userId);
+            List<String> keys = Arrays.asList(rankingKey, userIdStr);
             List<Object> args = Arrays.asList(requestId, 1, System.currentTimeMillis());
             log.debug("Lua脚本参数 - keys: {}, args: {}", keys, args);
 
@@ -69,7 +70,7 @@ public class LikeServiceImpl implements LikeService {
             log.info("更新排行榜结果: {}", result);
 
             // 验证分数是否更新成功
-            Double score = redisTemplate.opsForZSet().score(rankingKey, String.valueOf(userId));
+            Double score = redisTemplate.opsForZSet().score(rankingKey, userId);
             log.info("用户 {} 在排行榜 {} 中的最新分数: {}", userId, likeDto.getRankingListId(), score);
 
             return true;

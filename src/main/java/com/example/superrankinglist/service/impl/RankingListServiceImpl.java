@@ -11,12 +11,20 @@ import com.example.superrankinglist.pojo.User;
 import com.example.superrankinglist.service.RankingListService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,6 +52,16 @@ public class RankingListServiceImpl implements RankingListService {
     @Autowired
     private UserMapper userMapper;
 
+    private DefaultRedisScript<List> getUserRankScript;
+
+    @PostConstruct
+    public void init() {
+        // 初始化Lua脚本
+        getUserRankScript = new DefaultRedisScript<>();
+        getUserRankScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("lua/get_user_rank.lua")));
+        getUserRankScript.setResultType(List.class);
+    }
+
     @Override
     public Page<RankingItem> queryRankingList(RankingListQueryDto queryDto) {
         // 参数验证
@@ -55,15 +73,24 @@ public class RankingListServiceImpl implements RankingListService {
         String rankingKey = RANKING_KEY_PREFIX + queryDto.getRankingListId();
         log.info("查询排行榜，key: {}", rankingKey);
 
-        // 计算分页参数
-        int startIndex = (queryDto.getPageNum() - 1) * queryDto.getPageSize();
-        int endIndex = startIndex + queryDto.getPageSize() - 1;
-        log.info("分页参数 - startIndex: {}, endIndex: {}", startIndex, endIndex);
-
         try {
+            // 计算分页参数
+            long start;
+            long end;
+            if (queryDto.getPageNum() == 0) {
+                // 不分页时，获取完整的排行榜数据
+                start = 0;
+                end = -1;
+            } else {
+                // 分页时，获取指定区间的数据
+                start = (long) (queryDto.getPageNum() - 1) * queryDto.getPageSize();
+                end = start + queryDto.getPageSize() - 1;
+            }
+            log.info("分页参数 - start: {}, end: {}", start, end);
+
             // 使用ZREVRANGE获取排行榜数据
             Set<ZSetOperations.TypedTuple<Object>> rankingData = redisTemplate.opsForZSet()
-                    .reverseRangeWithScores(rankingKey, startIndex, endIndex);
+                    .reverseRangeWithScores(rankingKey, start, end);
             log.info("从Redis获取到的排行榜数据: {}", rankingData);
 
             if (rankingData == null || rankingData.isEmpty()) {
@@ -75,73 +102,92 @@ public class RankingListServiceImpl implements RankingListService {
             Long total = redisTemplate.opsForZSet().size(rankingKey);
             log.info("排行榜总记录数: {}", total);
 
-            // 收集所有用户ID
-            List<String> userIds = rankingData.stream()
-                    .map(tuple -> {
-                        Object value = tuple.getValue();
-                        return value != null ? String.valueOf(value) : null;
-                    })
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-            log.info("收集到的用户ID列表: {}", userIds);
-
-            // 如果userIds为空，直接返回空分页结果
-            if (userIds.isEmpty()) {
-                Page<RankingItem> emptyPage = new Page<>(queryDto.getPageNum(), queryDto.getPageSize());
-                emptyPage.setTotal(0L);
-                return emptyPage;
-            }
-
-            // 批量查询用户信息
-            Map<Long, User> userMap = userMapper.selectBatchIds(userIds)
-                    .stream()
-                    .collect(Collectors.toMap(User::getId, user -> user));
-
             // 转换数据
-            List<RankingItem> items = rankingData.stream()
-                    .map(tuple -> {
-                        Object value = tuple.getValue();
-                        if (value == null) {
-                            return null;
-                        }
-                        String userId = String.valueOf(value);
-                        Double score = tuple.getScore();
-
-                        User user = userMap.get(Long.valueOf(userId));
-                        if (user == null) {
-                            log.warn("用户不存在: {}", userId);
-                            return null;
-                        }
-
-                        RankingItem item = new RankingItem();
-                        item.setUserId(user.getId());
-                        item.setScore(score != null ? score : 0.0);
-                        item.setRankingListId(queryDto.getRankingListId());
-                        item.setUser(user);  // 设置用户信息
-                        return item;
-                    })
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-
-            // 计算排名
-            for (int i = 0; i < items.size(); i++) {
-                // 排名从1开始，且相同分数的用户排名相同
-                if (i > 0 && items.get(i).getScore().equals(items.get(i - 1).getScore())) {
-                    items.get(i).setRanking(items.get(i - 1).getRanking());
-                } else {
-                    items.get(i).setRanking((long) (startIndex + i + 1));
+            List<RankingItem> items = new ArrayList<>();
+            for (ZSetOperations.TypedTuple<Object> tuple : rankingData) {
+                Object value = tuple.getValue();
+                if (value == null) {
+                    continue;
                 }
+                
+                String userId = String.valueOf(value);
+                Double score = tuple.getScore();
+                
+                // 获取用户在整个排行榜中的真实排名
+                Long rank = redisTemplate.opsForZSet().reverseRank(rankingKey, Long.valueOf(userId));
+                log.debug("查询用户排名 - userId: {}, rank: {}", userId, rank);
+                
+                // 只显示前10000名的数据
+                if (rank != null && rank >= 10000) {
+                    continue;
+                }
+                
+                RankingItem item = new RankingItem();
+                // 确保用户ID格式一致
+                item.setUserId(Long.valueOf(userId));
+                item.setScore(score != null ? score : 0.0);
+                item.setRankingListId(queryDto.getRankingListId());
+                // 排名从1开始，所以需要+1
+                item.setRanking(rank != null ? rank + 1 : 0L);
+                items.add(item);
             }
 
             // 创建分页对象
             Page<RankingItem> page = new Page<>(queryDto.getPageNum(), queryDto.getPageSize());
             page.setRecords(items);
-            page.setTotal(total != null ? total : 0);
+            // 限制总数为10000
+            page.setTotal(Math.min(total != null ? total : 0, 10000));
 
             return page;
         } catch (Exception e) {
             log.error("查询排行榜失败", e);
             throw new RuntimeException("查询排行榜失败", e);
+        }
+    }
+
+    /**
+     * 获取用户的排名和积分
+     * @param rankingListId 排行榜ID
+     * @param userId 用户ID
+     * @return 包含用户排名和积分的对象
+     */
+    public RankingItem getUserRankAndScore(Long rankingListId, Long userId) {
+        if (rankingListId == null || userId == null) {
+            throw new IllegalArgumentException("排行榜ID和用户ID不能为空");
+        }
+
+        String rankingKey = RANKING_KEY_PREFIX + rankingListId;
+        log.info("获取用户排名和积分，key: {}, userId: {}", rankingKey, userId);
+
+        try {
+            // 执行Lua脚本，确保参数类型正确
+            List<Object> result = redisTemplate.execute(
+                getUserRankScript,
+                Arrays.asList(rankingKey, userId.toString()),
+                Collections.emptyList()
+            );
+
+            if (result == null || result.size() != 2) {
+                log.warn("获取用户排名和积分失败，userId: {}", userId);
+                return null;
+            }
+
+            // 解析结果
+            Long rank = ((Number) result.get(0)).longValue();
+            Double score = ((Number) result.get(1)).doubleValue();
+
+            // 创建返回对象
+            RankingItem item = new RankingItem();
+            item.setUserId(userId);
+            item.setRankingListId(rankingListId);
+            item.setScore(score);
+            // 排名从1开始，所以需要+1
+            item.setRanking(rank >= 0 ? rank + 1 : 0L);
+
+            return item;
+        } catch (Exception e) {
+            log.error("获取用户排名和积分失败", e);
+            throw new RuntimeException("获取用户排名和积分失败", e);
         }
     }
 

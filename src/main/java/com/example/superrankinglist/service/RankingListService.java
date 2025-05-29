@@ -80,4 +80,12 @@ public interface RankingListService {
      * @param id 排行榜ID
      */
     void deleteRankingList(Long id);
+
+    /**
+     * 获取用户的排名和积分
+     * @param rankingListId 排行榜ID
+     * @param userId 用户ID
+     * @return 包含用户排名和积分的对象
+     */
+    RankingItem getUserRankAndScore(Long rankingListId, Long userId);
 }

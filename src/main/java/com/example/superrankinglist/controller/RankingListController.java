@@ -6,10 +6,9 @@ import com.example.superrankinglist.dto.RankingListQueryDto;
 import com.example.superrankinglist.pojo.RankingItem;
 import com.example.superrankinglist.service.RankingListService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 排行榜控制器
@@ -17,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/ranking")
 public class RankingListController {
+
+    private static final Logger log = LoggerFactory.getLogger(RankingListController.class);
 
     @Autowired
     private RankingListService rankingListService;
@@ -50,6 +51,17 @@ public class RankingListController {
             return Result.success(page);
         } catch (Exception e) {
             return Result.error("查询排行榜失败：" + e.getMessage());
+        }
+    }
+
+    @GetMapping("/user/rank")
+    public Result<RankingItem> getUserRankAndScore(@RequestParam Long rankingListId, @RequestParam Long userId) {
+        try {
+            RankingItem rankingItem = rankingListService.getUserRankAndScore(rankingListId, userId);
+            return Result.success(rankingItem);
+        } catch (Exception e) {
+            log.error("获取用户排名失败", e);
+            return Result.error("获取用户排名失败");
         }
     }
 } 

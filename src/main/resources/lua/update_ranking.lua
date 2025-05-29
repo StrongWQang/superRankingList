@@ -6,7 +6,7 @@ local function update_ranking()
     end
 
     local ranking_key = KEYS[1]
-    local user_id = KEYS[2]
+    local user_id = tostring(KEYS[2])  -- 确保user_id是字符串格式
     local request_id = ARGV[1]
     local score = tonumber(ARGV[2])
     local timestamp = ARGV[3]
