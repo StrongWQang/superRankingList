@@ -21,19 +21,19 @@ public class LikeServiceImplTest {
     private RedisTemplate<String, Object> redisTemplate;
 
     private static final String RANKING_KEY = RedisKey.RANKING_KEY_PREFIX + 1;
-    private static final int TEST_DATA_SIZE = 10000;
+    private static final int TEST_DATA_SIZE = 100000;
     private static final Random random = new Random();
 
     @Test
     public void generateTestData() {
         // 清空测试数据
-        redisTemplate.delete(RANKING_KEY);
+        //redisTemplate.delete(RANKING_KEY);
         
         System.out.println("开始生成测试数据...");
         long startTime = System.currentTimeMillis();
 
         // 生成并插入测试数据
-        for (int i = 1; i <= TEST_DATA_SIZE; i++) {
+        for (int i = 10000; i <= TEST_DATA_SIZE; i++) {
             long userId = i;
             // 生成1-1000之间的随机点赞数
             int likes = random.nextInt(10000000) + 1;

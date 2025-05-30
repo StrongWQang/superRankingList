@@ -41,3 +41,10 @@ logging:
   level:
     com.example.superrankinglist: DEBUG
     org.springframework.web: INFO 
+
+# 排行榜配置
+ranking:
+  # 保留前N名，超过该数量的用户将被清理
+  keep-top-n: 10000
+  # 清理任务执行时间，默认每天凌晨2点
+  cleanup-cron: "0 */1 * * * ?"
