@@ -21,7 +21,7 @@ public class LikeServiceImplTest {
     private RedisTemplate<String, Object> redisTemplate;
 
     private static final String RANKING_KEY = RedisKey.RANKING_KEY_PREFIX + 1;
-    private static final int TEST_DATA_SIZE = 1000;
+    private static final int TEST_DATA_SIZE = 10000;
     private static final Random random = new Random();
 
     @Test
@@ -36,7 +36,7 @@ public class LikeServiceImplTest {
         for (int i = 1; i <= TEST_DATA_SIZE; i++) {
             long userId = i;
             // 生成1-1000之间的随机点赞数
-            int likes = random.nextInt(1000) + 1;
+            int likes = random.nextInt(10000000) + 1;
             
             // 使用ZADD命令添加数据到排行榜
             redisTemplate.opsForZSet().add(RANKING_KEY, userId, likes);

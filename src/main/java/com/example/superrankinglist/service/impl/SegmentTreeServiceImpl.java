@@ -1,5 +1,6 @@
 package com.example.superrankinglist.service.impl;
 
+import com.example.superrankinglist.pojo.RankingItem;
 import com.example.superrankinglist.pojo.SegmentTreeNode;
 import com.example.superrankinglist.service.SegmentTreeService;
 import lombok.extern.log4j.Log4j2;
@@ -69,11 +70,12 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
             // 检查并初始化线段树
             if(redisTemplate.keys(rankingKey).isEmpty()) {
                 log.info("排行榜 {} 的线段树不存在，开始初始化", rankingListId);
-                initSegmentTree(rankingListId, 0.0, 10000.0, 1000);
+                initSegmentTree(rankingListId, 0.0, 1000000.0, 10000);
                 log.info("排行榜 {} 的线段树初始化完成", rankingListId);
             }
             // 构建线段树
             SegmentTreeNode root = buildSegmentTree(rankingKey);
+            log.info("构建的线段树: {}", root);
             if (root == null) {
                 log.error("构建线段树失败 - rankingListId: {}", rankingListId);
                 throw new RuntimeException("构建线段树失败");
@@ -85,24 +87,44 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
             log.info("需要更新的区间 - 旧分数路径: {}, 新分数路径: {}", 
                 oldPath.stream().map(SegmentTreeNode::getSegmentKey).collect(Collectors.toList()),
                 newPath.stream().map(SegmentTreeNode::getSegmentKey).collect(Collectors.toList()));
+            
+            // 构建更新参数列表
             List<String> segmentsToUpdate = new ArrayList<>();
-            oldPath.forEach(segment -> segmentsToUpdate.add(segment.getSegmentKey() + ":-1"));
-            newPath.forEach(segment -> segmentsToUpdate.add(segment.getSegmentKey() + ":1"));
+            segmentsToUpdate.addAll(buildUpdateParams(oldPath, -1));
+            segmentsToUpdate.addAll(buildUpdateParams(newPath, 1));
+            
             if (segmentsToUpdate.isEmpty()) {
                 log.warn("没有需要更新的区间 - rankingListId: {}, oldScore: {}, newScore: {}", 
                     rankingListId, oldScore, newScore);
                 return;
             }
-            log.info("准备更新区间计数 - 更新数据: {}", segmentsToUpdate);
-            // 使用Lua脚本原子性地更新区间计数
-            Long result = redisTemplate.execute(updateScoreScript, Arrays.asList(rankingKey), segmentsToUpdate.toArray());
-            if (result == null || result != 1) {
-                log.error("更新区间计数失败 - rankingListId: {}, result: {}", rankingListId, result);
-                throw new RuntimeException("更新区间计数失败");
+            
+            log.debug("准备更新区间计数 - 更新数据: {}", segmentsToUpdate);
+            
+            // 确保所有参数都是字符串类型
+            String[] args = segmentsToUpdate.toArray(new String[0]);
+            
+            try {
+                // 使用Lua脚本原子性地更新区间计数
+                Long result = redisTemplate.execute(
+                    updateScoreScript, 
+                    Collections.singletonList(rankingKey), 
+                    (Object[]) args
+                );
+                
+                if (result == null || result != 1) {
+                    log.error("更新区间计数失败 - rankingListId: {}, result: {}", rankingListId, result);
+                    throw new RuntimeException("更新区间计数失败");
+                }
+                
+                // 验证更新结果
+                Map<Object, Object> updatedSegments = redisTemplate.opsForHash().entries(rankingKey);
+                log.debug("更新后的区间计数: {}", updatedSegments);
+            } catch (Exception e) {
+                log.error("执行Lua脚本失败 - rankingListId: {}, error: {}", rankingListId, e.getMessage());
+                throw new RuntimeException("更新排行榜分数失败", e);
             }
-            // 验证更新结果
-            Map<Object, Object> updatedSegments = redisTemplate.opsForHash().entries(rankingKey);
-            log.info("更新后的区间计数: {}", updatedSegments);
+            
             log.info("成功更新排行榜分数 - rankingListId: {}, oldScore: {}, newScore: {}", 
                 rankingListId, oldScore, newScore);
         } catch (Exception e) {
@@ -152,9 +174,54 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
     }
 
     /**
+     * 构建分段线段树
+     */
+    private SegmentTreeNode buildSegmentTreeBySegments(double minScore, double maxScore, int segmentCount) {
+        // 确保使用整数边界
+        int min = (int)Math.floor(minScore);
+        int max = (int)Math.floor(maxScore);
+        return buildSegmentTreeRecursive(min, max);
+    }
+
+    /**
+     * 递归构建线段树，按照指定的区间结构
+     */
+    private SegmentTreeNode buildSegmentTreeRecursive(int start, int end) {
+        // 创建当前节点
+        SegmentTreeNode node = new SegmentTreeNode((double)start, (double)end);
+        
+        // 计算当前区间长度
+        int length = end - start + 1;
+        
+        // 如果区间长度小于等于100，则为叶子节点
+        if (length <= 100) {
+            return node;
+        }
+        
+        if (length > 500) {
+            // 第一层划分：[0,499] 和 [500,1000]
+            int mid = start + 499;
+            node.setLeft(buildSegmentTreeRecursive(start, mid));
+            node.setRight(buildSegmentTreeRecursive(mid + 1, end));
+        } 
+        else if (length > 200) {
+            // 第二层划分：确保每个子区间能被100整除
+            int mid = start + ((length / 2) / 100) * 100 - 1;
+            node.setLeft(buildSegmentTreeRecursive(start, mid));
+            node.setRight(buildSegmentTreeRecursive(mid + 1, end));
+        }
+        else {
+            // 第三层划分：每100一段
+            int mid = start + 99;
+            node.setLeft(buildSegmentTreeRecursive(start, mid));
+            node.setRight(buildSegmentTreeRecursive(mid + 1, end));
+        }
+        
+        return node;
+    }
+
+    /**
      * 从Redis数据构建线段树
-     * @param rankingKey Redis中的key
-     * @return 线段树根节点
      */
     private SegmentTreeNode buildSegmentTree(String rankingKey) {
         Map<Object, Object> segmentMap = redisTemplate.opsForHash().entries(rankingKey);
@@ -162,129 +229,143 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
             return null;
         }
 
-        // 构建线段树节点
-        List<SegmentTreeNode> nodes = new ArrayList<>();
-        segmentMap.forEach((key, value) -> {
-            String[] range = key.toString().split("-");
-            SegmentTreeNode node = new SegmentTreeNode(
-                Double.parseDouble(range[0]), 
-                Double.parseDouble(range[1])
-            );
-            node.setCount(Long.parseLong(value.toString()));
-            nodes.add(node);
-        });
-
-        return buildTreeFromNodes(nodes);
-    }
-
-    /**
-     * 构建分段线段树（如[1,100],[101,200]...）
-     * @param minScore 最小积分
-     * @param maxScore 最大积分
-     * @param segmentCount 分段数
-     * @return 线段树根节点
-     */
-    private SegmentTreeNode buildSegmentTreeBySegments(int minScore, int maxScore, int segmentCount) {
-        int segmentLen = (maxScore - minScore + 1) / segmentCount;
-        List<SegmentTreeNode> leaves = new ArrayList<>();
-        for (int i = 0; i < segmentCount; i++) {
-            int lower = minScore + i * segmentLen;
-            int upper = (i == segmentCount - 1) ? maxScore : lower + segmentLen - 1;
-            leaves.add(new SegmentTreeNode((double)lower, (double)upper));
-        }
-        return buildTreeFromLeaves(leaves, 0, leaves.size() - 1);
-    }
-
-    /**
-     * 递归合并叶子节点，构建线段树
-     */
-    private SegmentTreeNode buildTreeFromLeaves(List<SegmentTreeNode> leaves, int l, int r) {
-        if (l == r) return leaves.get(l);
-        int mid = (l + r) / 2;
-        SegmentTreeNode left = buildTreeFromLeaves(leaves, l, mid);
-        SegmentTreeNode right = buildTreeFromLeaves(leaves, mid + 1, r);
-        SegmentTreeNode parent = new SegmentTreeNode(left.getLower(), right.getUpper());
-        parent.setLeft(left);
-        parent.setRight(right);
-        return parent;
-    }
-
-
-    /**
-     * 从节点列表构建平衡树
-     * @param nodes 节点列表
-     * @return 平衡树的根节点
-     */
-    private SegmentTreeNode buildTreeFromNodes(List<SegmentTreeNode> nodes) {
-        if (nodes.isEmpty()) {
-            return null;
-        }
-
-        // 按照区间下界排序
-        nodes.sort((a, b) -> a.getLower().compareTo(b.getLower()));
-
-        // 构建平衡树
-        return buildBalancedTree(nodes, 0, nodes.size() - 1);
-    }
-
-    /**
-     * 递归构建平衡树
-     * @param nodes 节点列表
-     * @param start 起始索引
-     * @param end 结束索引
-     * @return 子树根节点
-     */
-    private SegmentTreeNode buildBalancedTree(List<SegmentTreeNode> nodes, int start, int end) {
-        if (start > end) {
-            return null;
-        }
-
-        int mid = (start + end) / 2;
-        SegmentTreeNode root = nodes.get(mid);
+        // 找到最小和最大边界
+        int minBound = Integer.MAX_VALUE;
+        int maxBound = Integer.MIN_VALUE;
         
-        // 递归构建左右子树
-        root.setLeft(buildBalancedTree(nodes, start, mid - 1));
-        root.setRight(buildBalancedTree(nodes, mid + 1, end));
+        // 解析所有区间，找到整体边界
+        for (Object key : segmentMap.keySet()) {
+            try {
+                // 移除多余的引号和空格
+                String keyStr = key.toString().trim().replaceAll("^\"|\"$", "");
+                String[] range = keyStr.split("-");
+                if (range.length != 2) {
+                    log.warn("无效的区间格式: {}", key);
+                    continue;
+                }
+                
+                // 处理可能的小数点格式
+                double lower = Double.parseDouble(range[0].trim());
+                double upper = Double.parseDouble(range[1].trim());
+                
+                // 转换为整数
+                int lowerInt = (int)Math.floor(lower);
+                int upperInt = (int)Math.floor(upper);
+                
+                minBound = Math.min(minBound, lowerInt);
+                maxBound = Math.max(maxBound, upperInt);
+            } catch (NumberFormatException e) {
+                log.error("解析区间边界失败: {}, error: {}", key, e.getMessage());
+                continue;
+            }
+        }
+        
+        if (minBound == Integer.MAX_VALUE || maxBound == Integer.MIN_VALUE) {
+            log.error("未找到有效的区间边界");
+            return null;
+        }
+        
+        // 构建树结构
+        SegmentTreeNode root = buildSegmentTreeRecursive(minBound, maxBound);
+        
+        // 填充计数
+        for (Map.Entry<Object, Object> entry : segmentMap.entrySet()) {
+            try {
+                // 移除多余的引号和空格
+                String keyStr = entry.getKey().toString().trim().replaceAll("^\"|\"$", "");
+                String[] range = keyStr.split("-");
+                if (range.length != 2) {
+                    continue;
+                }
+                
+                // 处理可能的小数点格式
+                double lower = Double.parseDouble(range[0].trim());
+                double upper = Double.parseDouble(range[1].trim());
+                
+                // 转换为整数
+                int lowerInt = (int)Math.floor(lower);
+                int upperInt = (int)Math.floor(upper);
+                
+                // 处理值中可能的引号
+                String valueStr = entry.getValue().toString().trim().replaceAll("^\"|\"$", "");
+                long count = Long.parseLong(valueStr);
+                
+                // 找到对应节点并设置计数
+                setNodeCount(root, lowerInt, upperInt, count);
+            } catch (NumberFormatException e) {
+                log.error("解析区间数据失败: key={}, value={}, error: {}", 
+                    entry.getKey(), entry.getValue(), e.getMessage());
+                continue;
+            }
+        }
         
         return root;
     }
 
     /**
-     * 使用线段树计算积分对应的粗估排名
+     * 设置节点的计数
+     */
+    private void setNodeCount(SegmentTreeNode node, int targetLower, int targetUpper, long count) {
+        if (node == null) return;
+        
+        // 使用Math.floor()去掉小数部分
+        int nodeLower = (int)Math.floor(node.getLower());
+        int nodeUpper = (int)Math.floor(node.getUpper());
+        
+        // 如果当前节点的区间完全匹配目标区间，设置计数
+        if (nodeLower == targetLower && nodeUpper == targetUpper) {
+            node.setCount(count);
+            return;
+        }
+        
+        // 否则递归设置子节点
+        setNodeCount(node.getLeft(), targetLower, targetUpper, count);
+        setNodeCount(node.getRight(), targetLower, targetUpper, count);
+    }
+
+    /**
+     * 使用线段树计算积分对应的排名
      * @param root 线段树根节点
      * @param score 用户积分
      * @return 粗估排名
      */
     private Long getRankFromSegmentTree(SegmentTreeNode root, Double score) {
         SegmentTreeNode currentNode = root;
-        Long biggerThanMe = 0L;  // 记录大于当前积分的用户数量
+        Long biggerThanMe = 0L;  // 记录分数高于score的节点的用户数量总和
 
         while (currentNode != null) {
+            // 如果当前节点的区间不包含score，退出循环
             if (currentNode.getLower() > score || currentNode.getUpper() < score) {
                 break;
             }
 
+            // 如果是叶子节点，计算在当前区间内的预估排名
             if (currentNode.getLeft() == null) {
-                // 找到积分所在区间，计算区间内排名
+                // 计算分数在当前区间内的相对位置
                 double numerator = (currentNode.getUpper() - score) * currentNode.getCount();
-                double fuzzyRank = numerator / (currentNode.getUpper() - currentNode.getLower() + 0.0001);
+                // 使用区间长度作为分母，加1避免除0
+                double fuzzyRank = numerator / (currentNode.getUpper() - currentNode.getLower() + 1);
+                // 返回当前区间的预估排名加上之前累积的更高分数区间的用户数量
                 return (long) fuzzyRank + biggerThanMe;
             }
 
+            // 使用左子节点的上界作为分割点
             Double split = currentNode.getLeft().getUpper();
             if (score <= split) {
-                // 积分在左子树，累加右子树的用户数量
+                // 如果score在左子树范围内
+                // 需要将右子树的用户数量加入到biggerThanMe中
                 if (currentNode.getRight() != null) {
                     biggerThanMe += currentNode.getRight().getCount();
                 }
+                // 继续遍历左子树
                 currentNode = currentNode.getLeft();
             } else {
-                // 积分在右子树
+                // 如果score在右子树范围内，继续遍历右子树
                 currentNode = currentNode.getRight();
             }
         }
 
-        return 0L;
+        return biggerThanMe;
     }
 
     /**
@@ -364,5 +445,19 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
             }
         }
         return path;
+    }
+
+    /**
+     * 构建更新参数
+     */
+    private List<String> buildUpdateParams(List<SegmentTreeNode> path, int delta) {
+        return path.stream().map(segment -> {
+            String[] bounds = segment.getSegmentKey().split("-");
+            // 使用4位小数点格式，与Redis中的格式保持一致
+            return String.format("%.4f-%.4f:%d", 
+                Double.parseDouble(bounds[0].trim()),
+                Double.parseDouble(bounds[1].trim()),
+                delta);
+        }).collect(Collectors.toList());
     }
 } 

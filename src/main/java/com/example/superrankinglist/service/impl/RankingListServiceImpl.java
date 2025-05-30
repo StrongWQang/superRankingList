@@ -153,7 +153,6 @@ public class RankingListServiceImpl implements RankingListService {
             throw new RuntimeException("查询排行榜失败", e);
         }
     }
-
     /**
      * 获取用户的排名和积分
      * @param rankingListId 排行榜ID
@@ -171,34 +170,101 @@ public class RankingListServiceImpl implements RankingListService {
         try {
             // 执行Lua脚本，确保参数类型正确
             List<Object> result = redisTemplate.execute(
-                getUserRankScript,
-                Arrays.asList(rankingKey, userId.toString()),
-                Collections.emptyList()
+                    getUserRankScript,
+                    Arrays.asList(rankingKey, userId.toString()),
+                    Collections.emptyList()
             );
-
-            if (result == null || result.size() != 2) {
-                log.warn("获取用户排名和积分失败，userId: {}", userId);
-                return null;
-            }
-
-            // 解析结果
-            Long rank = ((Number) result.get(0)).longValue();
-            Double score = ((Number) result.get(1)).doubleValue();
 
             // 创建返回对象
             RankingItem item = new RankingItem();
             item.setUserId(userId);
             item.setRankingListId(rankingListId);
+
+            // 如果从zset中获取不到用户信息
+            if (result == null || result.size() != 2 || ((Number) result.get(0)).longValue() < 0) {
+                log.info("在zset中未找到用户 {} 的排名，尝试从线段树获取粗略排名", userId);
+
+                // 尝试从zset中只获取分数
+                Double score = redisTemplate.opsForZSet().score(rankingKey, userId.toString());
+                if (score == null) {
+                    log.warn("用户 {} 在排行榜中不存在", userId);
+                    return null;
+                }
+
+                // 使用线段树获取粗略排名
+                Long fuzzyRank = segmentTreeService.getFuzzyRank(rankingListId, score);
+                log.info("用户 {} 的粗略排名为: {}", userId, fuzzyRank);
+
+                item.setScore(score);
+                // 排名从1开始，所以需要+1
+                item.setRanking(fuzzyRank + 1);
+                return item;
+            }
+
+            // 从zset中成功获取到排名和分数
+            Long rank = ((Number) result.get(0)).longValue();
+            Double score = ((Number) result.get(1)).doubleValue();
+
             item.setScore(score);
             // 排名从1开始，所以需要+1
-            item.setRanking(rank >= 0 ? rank + 1 : 0L);
+            item.setRanking(rank + 1);
 
             return item;
         } catch (Exception e) {
-            log.error("获取用户排名和积分失败", e);
+            log.error("获取用户排名和积分失败 - rankingListId: {}, userId: {}", rankingListId, userId, e);
             throw new RuntimeException("获取用户排名和积分失败", e);
         }
     }
+//    /**
+//     * 获取用户的排名和积分
+//     * @param rankingListId 排行榜ID
+//     * @param userId 用户ID
+//     * @return 包含用户排名和积分的对象
+//     */
+//    public RankingItem getUserRankAndScore(Long rankingListId, Long userId) {
+//        if (rankingListId == null || userId == null) {
+//            throw new IllegalArgumentException("排行榜ID和用户ID不能为空");
+//        }
+//
+//        String rankingKey = RANKING_KEY_PREFIX + rankingListId;
+//        log.info("获取用户排名和积分，key: {}, userId: {}", rankingKey, userId);
+//
+//
+//
+//        try {
+//            // 执行Lua脚本，确保参数类型正确
+//            List<Object> result = redisTemplate.execute(
+//                getUserRankScript,
+//                Arrays.asList(rankingKey, userId.toString()),
+//                Collections.emptyList()
+//            );
+//
+//            if (result == null || result.size() != 2) {
+//                log.warn("获取用户排名和积分失败，userId: {}", userId);
+//                return null;
+//            }
+//
+//            // 解析结果
+//            Long rank = ((Number) result.get(0)).longValue();
+//            Double score = ((Number) result.get(1)).doubleValue();
+//
+//            Long fuzzyRank = segmentTreeService.getFuzzyRank(rankingListId, score);
+//            log.info(fuzzyRank.toString());
+//
+//            // 创建返回对象
+//            RankingItem item = new RankingItem();
+//            item.setUserId(userId);
+//            item.setRankingListId(rankingListId);
+//            item.setScore(score);
+//            // 排名从1开始，所以需要+1
+//            item.setRanking(rank >= 0 ? rank + 1 : 0L);
+//
+//            return item;
+//        } catch (Exception e) {
+//            log.error("获取用户排名和积分失败", e);
+//            throw new RuntimeException("获取用户排名和积分失败", e);
+//        }
+//    }
 
     /**
      * 初始化排行榜的线段树

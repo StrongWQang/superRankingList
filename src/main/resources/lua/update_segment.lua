@@ -9,13 +9,24 @@ local function update_segment()
 
     -- 处理所有需要更新的区间
     for i = 1, #ARGV do
-        local segmentKey, delta = string.match(ARGV[i], '([^:]+):([^:]+)')
+        local segment_info = ARGV[i]
+        -- 移除可能存在的引号
+        segment_info = string.gsub(segment_info, '"', '')
+        -- 使用更宽松的模式匹配，支持小数点格式
+        local segmentKey, delta = string.match(segment_info, "([%d%.]+%-[%d%.]+):([-]?%d+)")
+        
         if not segmentKey or not delta then
-            return redis.error_reply("Invalid segment update format")
+            return redis.error_reply("Invalid segment update format: " .. tostring(segment_info))
         end
         
-        -- 使用HINCRBY命令更新计数
-        local newCount = redis.call('HINCRBY', segment_key, segmentKey, tonumber(delta))
+        -- 确保delta是整数
+        delta = tonumber(delta)
+        if not delta then
+            return redis.error_reply("Invalid delta value: " .. tostring(delta))
+        end
+        
+        -- 更新计数
+        local newCount = redis.call('HINCRBY', segment_key, segmentKey, delta)
         -- 如果计数小于0，设置为0
         if newCount < 0 then
             redis.call('HSET', segment_key, segmentKey, 0)
@@ -25,9 +36,4 @@ local function update_segment()
     return 1
 end
 
--- 执行更新操作并处理错误
-local status, result = pcall(update_segment)
-if not status then
-    return redis.error_reply(result)
-end
-return result 
+return update_segment() 

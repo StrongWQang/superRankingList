@@ -17,34 +17,34 @@ local function update_ranking()
     if not timestamp then
         return redis.error_reply("Timestamp is required")
     end
-
-    -- 获取用户的当前积分
-    local current_score = redis.call('ZSCORE', ranking_key, user_id)
-    local integer = 0  -- 整数部分。如果用户不存在，则其为0
     
-    if current_score ~= false then
-        integer = math.floor(current_score)  -- 如果用户存在，则截取整数部分
-    end
-    
-    integer = integer + score  -- 更新整数部分，即更新积分
-    
-    -- 将时间戳转换为四位小数
-    local timestamp_str = tostring(timestamp)
+        -- 获取用户的当前积分
+        local current_score = redis.call('ZSCORE', ranking_key, user_id)
+        local integer = 0  -- 整数部分。如果用户不存在，则其为0
+        
+        if current_score ~= false then
+            integer = math.floor(current_score)  -- 如果用户存在，则截取整数部分
+        end
+        
+        integer = integer + score  -- 更新整数部分，即更新积分
+        
+        -- 将时间戳转换为四位小数
+        local timestamp_str = tostring(timestamp)
     if #timestamp_str < 4 then
         return redis.error_reply("Invalid timestamp format")
     end
     
-    local last_four = string.sub(timestamp_str, -4)  -- 获取最后四位
+        local last_four = string.sub(timestamp_str, -4)  -- 获取最后四位
     local timestamp_decimal = tonumber('0.' .. last_four)  -- 转换为小数
     
     if not timestamp_decimal then
         return redis.error_reply("Failed to convert timestamp to decimal")
     end
     
-    local final_score = integer + timestamp_decimal  -- 将整数部分与小数部分组合为浮点数
-    
-    redis.call('ZADD', ranking_key, final_score, user_id)  -- 使用 ZADD 重置用户积分
-    return 1
+        local final_score = integer + timestamp_decimal  -- 将整数部分与小数部分组合为浮点数
+        
+        redis.call('ZADD', ranking_key, final_score, user_id)  -- 使用 ZADD 重置用户积分
+        return 1
 end
 
 -- 执行更新操作并处理错误
