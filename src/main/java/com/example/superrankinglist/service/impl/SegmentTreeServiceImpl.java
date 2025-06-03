@@ -134,13 +134,54 @@ public class SegmentTreeServiceImpl implements SegmentTreeService {
         }
     }
 
+    // 根据区间的最大值和分段数目创建线段树
+    public static SegmentTreeNode buildSegmentTree(long maxScore, long segCount) {
+        // 计算每个分段的长度
+        long segLen = maxScore / segCount;
+        if (maxScore % segCount != 0) {
+            segLen++;
+        }
+
+        java.util.List<SegmentTreeNode> parentLayerNodes = new java.util.ArrayList<>();
+        java.util.List<SegmentTreeNode> currentLayerNodes = new java.util.ArrayList<>();
+
+        // 创建各个分段
+        for (long i = 1; i <= maxScore; i += segLen) {
+            currentLayerNodes.add(new SegmentTreeNode((double) i, (double) (i + segLen - 1)));
+        }
+
+        // 循环构建完整的线段树
+        while (currentLayerNodes.size() >= 2) {
+            // 取出前两个节点
+            SegmentTreeNode leftNode = currentLayerNodes.get(0);
+            SegmentTreeNode rightNode = currentLayerNodes.get(1);
+            currentLayerNodes = currentLayerNodes.subList(2, currentLayerNodes.size());
+
+            // 创建父节点
+            SegmentTreeNode parentNode = new SegmentTreeNode(leftNode.getLower(), rightNode.getUpper());
+            parentNode.setLeft(leftNode);
+            parentNode.setRight(rightNode);
+
+            parentLayerNodes.add(parentNode);
+        }
+
+        // 如果currentLayerNodes为空，则说明某层节点已全部构建完成，需要到上一层继续构建
+        if (currentLayerNodes.isEmpty()) {
+            currentLayerNodes = parentLayerNodes;
+            parentLayerNodes = new java.util.ArrayList<>();
+        }
+
+        // 最终currentLayerNodes的首个节点是根节点
+        return currentLayerNodes.get(0);
+    }
+
     @Override
     public void initSegmentTree(Long rankingListId, Double minScore, Double maxScore, int segmentCount) {
         String rankingKey = SEGMENT_KEY_PREFIX + rankingListId;
         String zsetKey = RANKING_KEY_PREFIX + rankingListId;  // Redis ZSet的key
 
         // 构建分段线段树（如[1,100],[101,200]...）
-        SegmentTreeNode root = buildSegmentTreeBySegments(minScore.intValue(), maxScore.intValue(), segmentCount);
+        SegmentTreeNode root = buildSegmentTree(maxScore.intValue(), segmentCount);
 
         // 获取所有用户及其分数
         Set<Object> members = redisTemplate.opsForZSet().range(zsetKey, 0, -1);
