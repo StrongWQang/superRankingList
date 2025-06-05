@@ -2,7 +2,6 @@ package com.example.superrankinglist.service.impl;
 
 import com.example.superrankinglist.dto.LikeDto;
 import com.example.superrankinglist.service.LikeService;
-import com.example.superrankinglist.service.UserService;
 import com.example.superrankinglist.utils.UserContext;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,10 +30,8 @@ public class LikeServiceImpl implements LikeService {
 
     private DefaultRedisScript<Long> redisScript;
 
-    @Autowired SegmentTreeServiceImpl segmentTreeService;
-
     @Autowired
-    private RankingService rankingService;
+    private SegmentTreeServiceImpl segmentTreeServiceImpl;
 
     @PostConstruct
     public void init() {
@@ -77,7 +74,7 @@ public class LikeServiceImpl implements LikeService {
             Double newscore = redisTemplate.opsForZSet().score(rankingKey, userId);
             log.info("用户 {} 在排行榜 {} 中的最新分数: {}", userId, likeDto.getRankingListId(), newscore);
 
-            rankingService.updateUserScore(userId,oldscore,newscore);
+            segmentTreeServiceImpl.updateUserScore(userId,oldscore,newscore);
 
             return true;
         } catch (RedisSystemException e) {

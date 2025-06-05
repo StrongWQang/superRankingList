@@ -16,6 +16,7 @@ public class SegmentTree {
     private final String redisKey;  // Redis Hash的key
     private final RedisTemplate<String, String> redisTemplate;
     private static final int DECIMAL_PLACES = 4;  // 小数位数
+    private static final int BASE_SEGMENT_SIZE = 100; // 基础区间大小
 
     public SegmentTree(String redisKey, RedisTemplate<String, String> redisTemplate) {
         this.redisKey = redisKey;
@@ -26,28 +27,75 @@ public class SegmentTree {
      * 构建线段树
      * @param minScore 最小积分
      * @param maxScore 最大积分
-     * @param segmentCount 区间数量
      */
-    public void buildTree(double minScore, double maxScore, int segmentCount) {
+    public void buildTree(double minScore, double maxScore) {
+        // 确保边界是整数
+        minScore = Math.floor(minScore);
+        maxScore = Math.floor(maxScore);
+        
+        // 计算区间数量（确保是2的幂）
+        int segmentCount = calculateSegmentCount(minScore, maxScore);
         root = buildTreeRecursive(minScore, maxScore, segmentCount);
         initializeRedisCounts();
+    }
+
+    /**
+     * 计算区间数量
+     * 确保区间数量是2的幂，并且每个区间大小是BASE_SEGMENT_SIZE的倍数
+     */
+    private int calculateSegmentCount(double minScore, double maxScore) {
+        double range = maxScore - minScore;
+        // 确保至少有2个区间
+        int minSegments = 2;
+        // 计算需要的区间数量（向上取整到最接近的2的幂）
+        int count = Math.max(minSegments, (int) Math.ceil(range / BASE_SEGMENT_SIZE));
+        // 确保是2的幂
+        return (int) Math.pow(2, Math.ceil(Math.log(count) / Math.log(2)));
     }
 
     /**
      * 递归构建线段树
      */
     private SegmentTreeNode buildTreeRecursive(double lower, double upper, int remainingSegments) {
-        if (remainingSegments <= 1) {
+        // 确保边界是整数
+        lower = Math.floor(lower);
+        upper = Math.floor(upper);
+
+        // 如果区间太小或剩余段数为1，直接返回叶子节点
+        if (remainingSegments <= 1 || upper <= lower) {
             return new SegmentTreeNode(roundToDecimalPlaces(lower), roundToDecimalPlaces(upper));
         }
 
+        // 计算区间大小
+        double totalRange = upper - lower;
+        if (totalRange < BASE_SEGMENT_SIZE) {
+            return new SegmentTreeNode(roundToDecimalPlaces(lower), roundToDecimalPlaces(upper));
+        }
+
+        // 计算每个区间的大小（确保是BASE_SEGMENT_SIZE的倍数）
+        double segmentSize = Math.max(BASE_SEGMENT_SIZE, 
+            Math.ceil(totalRange / remainingSegments / BASE_SEGMENT_SIZE) * BASE_SEGMENT_SIZE);
+        
+        // 计算中间值
+        double mid = lower + segmentSize;
+        mid = Math.min(mid, upper - BASE_SEGMENT_SIZE); // 确保右区间至少有BASE_SEGMENT_SIZE大小
+        mid = Math.floor(mid);
+
+        // 如果中间值等于下界或上界，说明无法继续分割
+        if (mid <= lower || mid >= upper) {
+            return new SegmentTreeNode(roundToDecimalPlaces(lower), roundToDecimalPlaces(upper));
+        }
+
+        // 创建当前节点
         SegmentTreeNode node = new SegmentTreeNode(roundToDecimalPlaces(lower), roundToDecimalPlaces(upper));
-        double mid = lower + (upper - lower) / 2;
-        mid = roundToDecimalPlaces(mid);
+
+        // 计算左右子树的区间数量
+        int leftSegments = remainingSegments / 2;
+        int rightSegments = remainingSegments - leftSegments;
 
         // 递归构建左右子树
-        node.setLeft(buildTreeRecursive(lower, mid, remainingSegments / 2));
-        node.setRight(buildTreeRecursive(mid, upper, remainingSegments / 2));
+        node.setLeft(buildTreeRecursive(lower, mid, leftSegments));
+        node.setRight(buildTreeRecursive(mid, upper, rightSegments));
 
         return node;
     }

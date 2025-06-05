@@ -1,5 +1,6 @@
 package com.example.superrankinglist.common;
 
+
 public class SegmentTreeNode {
     private double lower;  // 区间下界
     private double upper;  // 区间上界
