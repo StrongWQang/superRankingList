@@ -8,10 +8,7 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import static com.example.superrankinglist.common.RedisKey.RANKING_KEY_PREFIX;
 import static com.example.superrankinglist.common.RedisKey.SEGMENT_KEY_PREFIX;
@@ -22,7 +19,7 @@ public class SegmentTreeServiceImpl {
     private final SegmentTree segmentTree;
     private final RedisTemplate<String, String> redisTemplate;
     private static final double MIN_SCORE = 0.0;
-    private static final double MAX_SCORE = 10000.0;
+    private static final double MAX_SCORE = 1000000.0;
 
     public SegmentTreeServiceImpl(RedisTemplate<String, String> redisTemplate) {
         this.redisTemplate = redisTemplate;
@@ -36,6 +33,7 @@ public class SegmentTreeServiceImpl {
             Boolean exists = redisTemplate.hasKey(SEGMENT_KEY_PREFIX+1);
             if (Boolean.FALSE.equals(exists)) {
                 log.info("初始化排行榜线段树...");
+                //buildSegmentTree((long) MIN_SCORE,(long) MAX_SCORE);
                 segmentTree.buildTree(MIN_SCORE, MAX_SCORE);
                 log.info("排行榜线段树初始化完成");
                 // 从Redis中获取所有排行榜数据
@@ -102,9 +100,6 @@ public class SegmentTreeServiceImpl {
             // 更新线段树中的计数
             segmentTree.updateScore(oldScore, newScore);
 
-//            // 更新Redis中的用户分数
-//            String rankingKey = RANKING_KEY_PREFIX + 1; // 假设使用排行榜ID 1
-//            redisTemplate.opsForZSet().add(rankingKey, String.valueOf(userId), newScore);
 
             log.debug("更新用户分数成功 - userId: {}, oldScore: {}, newScore: {}",
                     userId, oldScore, newScore);

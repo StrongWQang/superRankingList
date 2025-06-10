@@ -31,12 +31,12 @@ public class SegmentTree {
             segLen++;
         }
 
-        java.util.List<SegmentTreeNode> parentLayerNodes = new java.util.ArrayList<>();
-        java.util.List<SegmentTreeNode> currentLayerNodes = new java.util.ArrayList<>();
+        List<SegmentTreeNode> parentLayerNodes = new ArrayList<>();
+        List<SegmentTreeNode> currentLayerNodes = new ArrayList<>();
 
-        // 创建各个分段
+        // 创建各个分段，作为叶节点
         for (long i = 1; i <= maxScore; i += segLen) {
-            currentLayerNodes.add(new SegmentTreeNode(i, i + segLen - 1));
+            currentLayerNodes.add(new SegmentTreeNode(i, Math.min(i + segLen - 1, maxScore)));
         }
 
         // 循环构建完整的线段树
@@ -46,18 +46,18 @@ public class SegmentTree {
             SegmentTreeNode rightNode = currentLayerNodes.get(1);
             currentLayerNodes = currentLayerNodes.subList(2, currentLayerNodes.size());
 
-            // 创建父节点
+            // 创建父节点，合并数据区间
             SegmentTreeNode parentNode = new SegmentTreeNode(leftNode.lower, rightNode.upper);
             parentNode.left = leftNode;
             parentNode.right = rightNode;
 
             parentLayerNodes.add(parentNode);
-        }
 
-        // 如果currentLayerNodes为空，则说明某层节点已全部构建完成，需要到上一层继续构建
-        if (currentLayerNodes.isEmpty()) {
-            currentLayerNodes = parentLayerNodes;
-            parentLayerNodes = new java.util.ArrayList<>();
+            // 如果当前层节点已全部构建完成，需要到上一层继续构建
+            if (currentLayerNodes.isEmpty()) {
+                currentLayerNodes = parentLayerNodes;
+                parentLayerNodes = new ArrayList<>();
+            }
         }
 
         // 最终currentLayerNodes的首个节点是根节点
